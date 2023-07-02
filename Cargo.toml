@@ -79,6 +79,7 @@ wynd-utils = "0.4"
 cw-ownable = "0.5"
 
 cw-admin-factory = { path = "./contracts/external/cw-admin-factory", version = "2.3.0" }
+cw-bounties = { path = "contracts/external/cw-bounties", version = "*" }
 cw-denom = { path = "./packages/cw-denom", version = "2.3.0" }
 cw-hooks = { path = "./packages/cw-hooks", version = "2.3.0" }
 cw-wormhole = { path = "./packages/cw-wormhole", version = "2.3.0" }
