@@ -78,6 +78,7 @@ wynd-utils = "0.4"
 # optional owner.
 cw-ownable = "0.5"
 
+cw-abc = { path = "./contracts/external/cw-abc", version = "*" }
 cw-admin-factory = { path = "./contracts/external/cw-admin-factory", version = "2.3.0" }
 cw-denom = { path = "./packages/cw-denom", version = "2.3.0" }
 cw-hooks = { path = "./packages/cw-hooks", version = "2.3.0" }
