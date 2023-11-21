@@ -2,13 +2,12 @@ use crate::query::ProposalResponse;
 use crate::state::PROPOSAL_COUNT;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, BlockInfo, CosmosMsg, Decimal, Empty, StdResult, Storage, Uint128};
-use cw_utils::Expiration;
 use dao_voting::status::Status;
 use dao_voting::threshold::{PercentageThreshold, Threshold};
 use dao_voting::voting::{does_vote_count_fail, does_vote_count_pass, Votes};
 
 #[cw_serde]
-pub struct SingleChoiceProposal {
+pub struct SingleChoiceInstantProposal {
     pub title: String,
     pub description: String,
     /// The address that created this proposal.
@@ -17,13 +16,6 @@ pub struct SingleChoiceProposal {
     /// power queries should query for voting power at this block
     /// height.
     pub start_height: u64,
-    /// The minimum amount of time this proposal must remain open for
-    /// voting. The proposal may not pass unless this is expired or
-    /// None.
-    pub min_voting_period: Option<Expiration>,
-    /// The the time at which this proposal will expire and close for
-    /// additional votes.
-    pub expiration: Expiration,
     /// The threshold at which this proposal will pass.
     pub threshold: Threshold,
     /// The total amount of voting power at the time of this
@@ -33,7 +25,6 @@ pub struct SingleChoiceProposal {
     pub msgs: Vec<CosmosMsg<Empty>>,
     pub status: Status,
     pub votes: Votes,
-    pub allow_revoting: bool,
 }
 
 pub fn next_proposal_id(store: &dyn Storage) -> StdResult<u64> {
@@ -46,7 +37,7 @@ pub fn advance_proposal_id(store: &mut dyn Storage) -> StdResult<u64> {
     Ok(id)
 }
 
-impl SingleChoiceProposal {
+impl SingleChoiceInstantProposal {
     /// Consumes the proposal and returns a version which may be used
     /// in a query response. Why is this necessary? Proposal
     /// statuses are only updated on vote, execute, and close
@@ -63,9 +54,7 @@ impl SingleChoiceProposal {
     pub fn current_status(&self, block: &BlockInfo) -> Status {
         if self.status == Status::Open && self.is_passed(block) {
             Status::Passed
-        } else if self.status == Status::Open
-            && (self.expiration.is_expired(block) || self.is_rejected(block))
-        {
+        } else if self.status == Status::Open && self.is_rejected(block) {
             Status::Rejected
         } else {
             self.status
@@ -82,22 +71,6 @@ impl SingleChoiceProposal {
     /// expiration if no future sequence of possible votes can cause
     /// it to fail).
     pub fn is_passed(&self, block: &BlockInfo) -> bool {
-        // If re-voting is allowed nothing is known until the proposal
-        // has expired.
-        if self.allow_revoting && !self.expiration.is_expired(block) {
-            return false;
-        }
-        // If the min voting period is set and not expired the
-        // proposal can not yet be passed. This gives DAO members some
-        // time to remove liquidity / scheme on a recovery plan if a
-        // single actor accumulates enough tokens to unilaterally pass
-        // proposals.
-        if let Some(min) = self.min_voting_period {
-            if !min.is_expired(block) {
-                return false;
-            }
-        }
-
         match self.threshold {
             Threshold::AbsolutePercentage { percentage } => {
                 let options = self.total_power - self.votes.abstain;
@@ -108,17 +81,8 @@ impl SingleChoiceProposal {
                     return false;
                 }
 
-                if self.expiration.is_expired(block) {
-                    // If the quorum is met and the proposal is
-                    // expired the number of votes needed to pass a
-                    // proposal is compared to the number of votes on
-                    // the proposal.
-                    let options = self.votes.total() - self.votes.abstain;
-                    does_vote_count_pass(self.votes.yes, options, threshold)
-                } else {
-                    let options = self.total_power - self.votes.abstain;
-                    does_vote_count_pass(self.votes.yes, options, threshold)
-                }
+                let options = self.total_power - self.votes.abstain;
+                does_vote_count_pass(self.votes.yes, options, threshold)
             }
             Threshold::AbsoluteCount { threshold } => self.votes.yes >= threshold,
         }
@@ -127,12 +91,6 @@ impl SingleChoiceProposal {
     /// As above for the passed check, used to check if a proposal is
     /// already rejected.
     pub fn is_rejected(&self, block: &BlockInfo) -> bool {
-        // If re-voting is allowed and the proposal is not expired no
-        // information is known.
-        if self.allow_revoting && !self.expiration.is_expired(block) {
-            return false;
-        }
-
         match self.threshold {
             Threshold::AbsolutePercentage {
                 percentage: percentage_needed,
@@ -162,70 +120,25 @@ impl SingleChoiceProposal {
                 does_vote_count_fail(self.votes.no, options, percentage_needed)
             }
             Threshold::ThresholdQuorum { threshold, quorum } => {
-                match (
-                    does_vote_count_pass(self.votes.total(), self.total_power, quorum),
-                    self.expiration.is_expired(block),
-                ) {
-                    // Has met quorum and is expired.
-                    (true, true) => {
-                        // => consider only votes cast and see if no
-                        //    votes meet threshold.
-                        let options = self.votes.total() - self.votes.abstain;
+                let has_met_quorum =
+                    does_vote_count_pass(self.votes.total(), self.total_power, quorum);
 
-                        // If there is a 100% passing threshold..
-                        if threshold == PercentageThreshold::Percent(Decimal::percent(100)) {
-                            if options == Uint128::zero() {
-                                // and there are no possible votes (zero
-                                // voting power or all abstain), then this
-                                // proposal has been rejected.
-                                return true;
-                            } else {
-                                // and there are possible votes, then this is
-                                // rejected if there is a single no vote.
-                                //
-                                // We need this check becuase
-                                // otherwise when we invert the
-                                // threshold (`Decimal::one() -
-                                // threshold`) we get a 0% requirement
-                                // for no votes. Zero no votes do
-                                // indeed meet a 0% threshold.
-                                return self.votes.no >= Uint128::new(1);
-                            }
+                if has_met_quorum {
+                    // => consider all possible votes and see if no votes meet threshold.
+                    let options = self.total_power - self.votes.abstain;
+
+                    if threshold == PercentageThreshold::Percent(Decimal::percent(100)) {
+                        if options == Uint128::zero() {
+                            return true;
+                        } else {
+                            return self.votes.no >= Uint128::new(1);
                         }
-                        does_vote_count_fail(self.votes.no, options, threshold)
                     }
-                    // Has met quorum and is not expired.
-                    // | Hasn't met quorum and is not expired.
-                    (true, false) | (false, false) => {
-                        // => consider all possible votes and see if
-                        //    no votes meet threshold.
-                        let options = self.total_power - self.votes.abstain;
 
-                        // If there is a 100% passing threshold..
-                        if threshold == PercentageThreshold::Percent(Decimal::percent(100)) {
-                            if options == Uint128::zero() {
-                                // and there are no possible votes (zero
-                                // voting power or all abstain), then this
-                                // proposal has been rejected.
-                                return true;
-                            } else {
-                                // and there are possible votes, then this is
-                                // rejected if there is a single no vote.
-                                //
-                                // We need this check because otherwise
-                                // when we invert the threshold
-                                // (`Decimal::one() - threshold`) we
-                                // get a 0% requirement for no
-                                // votes. Zero no votes do indeed meet
-                                // a 0% threshold.
-                                return self.votes.no >= Uint128::new(1);
-                            }
-                        }
-
-                        does_vote_count_fail(self.votes.no, options, threshold)
-                    }
-                    // Hasn't met quorum requirement and voting has closed => rejected.
-                    (false, true) => true,
+                    does_vote_count_fail(self.votes.no, options, threshold)
+                } else {
+                    // Hasn't met quorum => rejected.
+                    true
                 }
             }
             Threshold::AbsoluteCount { threshold } => {
@@ -253,25 +166,14 @@ mod test {
         is_expired: bool,
         min_voting_period_elapsed: bool,
         allow_revoting: bool,
-    ) -> (SingleChoiceProposal, BlockInfo) {
+    ) -> (SingleChoiceInstantProposal, BlockInfo) {
         let block = mock_env().block;
-        let expiration = match is_expired {
-            true => Expiration::AtHeight(block.height - 5),
-            false => Expiration::AtHeight(block.height + 100),
-        };
-        let min_voting_period = match min_voting_period_elapsed {
-            true => Expiration::AtHeight(block.height - 5),
-            false => Expiration::AtHeight(block.height + 5),
-        };
 
-        let prop = SingleChoiceProposal {
+        let prop = SingleChoiceInstantProposal {
             title: "Demo".to_string(),
             description: "Info".to_string(),
             proposer: Addr::unchecked("test"),
             start_height: 100,
-            expiration,
-            min_voting_period: Some(min_voting_period),
-            allow_revoting,
             msgs: vec![],
             status: Status::Open,
             threshold,

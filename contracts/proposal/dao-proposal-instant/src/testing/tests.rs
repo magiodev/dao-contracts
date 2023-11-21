@@ -31,7 +31,7 @@ use dao_voting::{
 use crate::{
     contract::{migrate, CONTRACT_NAME, CONTRACT_VERSION},
     msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg},
-    proposal::SingleChoiceProposal,
+    proposal::SingleChoiceInstantProposal,
     query::{ProposalResponse, VoteInfo},
     state::Config,
     testing::{
@@ -115,18 +115,15 @@ fn test_simple_propose_staked_balances() {
 
     // These values just come from the default instantiate message
     // values.
-    let expected = SingleChoiceProposal {
+    let expected = SingleChoiceInstantProposal {
         title: "title".to_string(),
         description: "description".to_string(),
         proposer: Addr::unchecked(CREATOR_ADDR),
         start_height: current_block.height,
-        expiration: Duration::Time(604800).after(&current_block),
-        min_voting_period: None,
         threshold: Threshold::ThresholdQuorum {
             quorum: PercentageThreshold::Percent(Decimal::percent(15)),
             threshold: PercentageThreshold::Majority {},
         },
-        allow_revoting: false,
         total_power: Uint128::new(100_000_000),
         msgs: vec![],
         status: Status::Open,
@@ -164,18 +161,15 @@ fn test_simple_proposal_cw4_voting() {
 
     // These values just come from the default instantiate message
     // values.
-    let expected = SingleChoiceProposal {
+    let expected = SingleChoiceInstantProposal {
         title: "title".to_string(),
         description: "description".to_string(),
         proposer: Addr::unchecked(CREATOR_ADDR),
         start_height: current_block.height,
-        expiration: Duration::Time(604800).after(&current_block),
-        min_voting_period: None,
         threshold: Threshold::ThresholdQuorum {
             threshold: PercentageThreshold::Percent(Decimal::percent(15)),
             quorum: PercentageThreshold::Majority {},
         },
-        allow_revoting: false,
         total_power: Uint128::new(1),
         msgs: vec![],
         status: Status::Open,
@@ -268,18 +262,15 @@ fn test_instantiate_with_non_voting_module_cw20_deposit() {
 
     // These values just come from the default instantiate message
     // values.
-    let expected = SingleChoiceProposal {
+    let expected = SingleChoiceInstantProposal {
         title: "title".to_string(),
         description: "description".to_string(),
         proposer: Addr::unchecked(CREATOR_ADDR),
         start_height: current_block.height,
-        expiration: Duration::Time(604800).after(&current_block),
-        min_voting_period: None,
         threshold: Threshold::ThresholdQuorum {
             threshold: PercentageThreshold::Percent(Decimal::percent(15)),
             quorum: PercentageThreshold::Majority {},
         },
-        allow_revoting: false,
         total_power: Uint128::new(1),
         msgs: vec![],
         status: Status::Open,
@@ -583,11 +574,8 @@ fn test_update_config() {
                     threshold: Uint128::new(10_000),
                 },
                 max_voting_period: Duration::Height(6),
-                min_voting_period: None,
                 only_members_execute: true,
-                allow_revoting: false,
                 dao: core_addr.to_string(),
-                close_proposal_on_execution_failure: false,
             })
             .unwrap(),
             funds: vec![],
@@ -611,11 +599,8 @@ fn test_update_config() {
                 threshold: Uint128::new(10_000)
             },
             max_voting_period: Duration::Height(6),
-            min_voting_period: None,
             only_members_execute: true,
-            allow_revoting: false,
             dao: core_addr.clone(),
-            close_proposal_on_execution_failure: false,
         }
     );
 
@@ -629,11 +614,8 @@ fn test_update_config() {
                     threshold: Uint128::new(10_000),
                 },
                 max_voting_period: Duration::Height(6),
-                min_voting_period: None,
                 only_members_execute: true,
-                allow_revoting: false,
                 dao: core_addr.to_string(),
-                close_proposal_on_execution_failure: false,
             },
             &[],
         )
@@ -699,18 +681,15 @@ fn test_anyone_may_propose_and_proposal_listing() {
         four_and_five.proposals[0],
         ProposalResponse {
             id: 4,
-            proposal: SingleChoiceProposal {
+            proposal: SingleChoiceInstantProposal {
                 title: "title".to_string(),
                 description: "description".to_string(),
                 proposer: Addr::unchecked("pppppp"),
                 start_height: current_block.height,
-                min_voting_period: None,
-                expiration: Duration::Time(604800).after(&current_block),
                 threshold: Threshold::ThresholdQuorum {
                     quorum: PercentageThreshold::Percent(Decimal::percent(15)),
                     threshold: PercentageThreshold::Majority {},
                 },
-                allow_revoting: false,
                 total_power: Uint128::new(100_000_000),
                 msgs: vec![],
                 status: Status::Executed,
@@ -1190,12 +1169,8 @@ fn test_allow_revoting_config_changes() {
                 threshold: PercentageThreshold::Majority {},
             },
             max_voting_period: Duration::Height(10),
-            min_voting_period: None,
             only_members_execute: true,
-            // Turn off revoting.
-            allow_revoting: false,
             dao: core_addr.to_string(),
-            close_proposal_on_execution_failure: false,
         },
         &[],
     )
@@ -1783,11 +1758,8 @@ fn test_migrate_from_v1() {
                 percentage: PercentageThreshold::Majority {}
             },
             max_voting_period: Duration::Height(6),
-            min_voting_period: None,
             only_members_execute: false,
-            allow_revoting: false,
             dao: core_addr.clone(),
-            close_proposal_on_execution_failure: true,
         }
     );
 
@@ -1915,12 +1887,8 @@ fn test_execution_failed() {
         &ExecuteMsg::UpdateConfig {
             threshold: config.threshold,
             max_voting_period: config.max_voting_period,
-            min_voting_period: config.min_voting_period,
             only_members_execute: config.only_members_execute,
-            allow_revoting: config.allow_revoting,
             dao: config.dao.into_string(),
-            // Disable.
-            close_proposal_on_execution_failure: false,
         },
         &[],
     )
@@ -1970,17 +1938,14 @@ fn test_reply_proposal_mock() {
         .save(
             deps.as_mut().storage,
             1,
-            &SingleChoiceProposal {
+            &SingleChoiceInstantProposal {
                 title: "A simple text proposal".to_string(),
                 description: "This is a simple text proposal".to_string(),
                 proposer: Addr::unchecked(CREATOR_ADDR),
                 start_height: env.block.height,
-                expiration: cw_utils::Duration::Height(6).after(&env.block),
-                min_voting_period: None,
                 threshold: Threshold::AbsolutePercentage {
                     percentage: PercentageThreshold::Majority {},
                 },
-                allow_revoting: false,
                 total_power: Uint128::new(100_000_000),
                 msgs: vec![],
                 status: Status::Open,

@@ -219,7 +219,6 @@ pub fn test_executed_prop_state_remains_after_vote_swing() {
     let proposal = query_proposal(&app, &proposal_module, proposal_id);
     assert_eq!(proposal.proposal.status, Status::Executed);
     assert_eq!(proposal.proposal.votes.yes, Uint128::new(20));
-    assert!(!proposal.proposal.expiration.is_expired(&app.block_info()));
 
     // someone wakes up and casts their vote to express their
     // opinion (not affecting the result of proposal)

@@ -1,4 +1,4 @@
-use crate::proposal::SingleChoiceProposal;
+use crate::proposal::SingleChoiceInstantProposal;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Addr, Uint128};
 use dao_voting::voting::Vote;
@@ -8,7 +8,7 @@ use dao_voting::voting::Vote;
 pub struct ProposalResponse {
     /// The ID of the proposal being returned.
     pub id: u64,
-    pub proposal: SingleChoiceProposal,
+    pub proposal: SingleChoiceInstantProposal,
 }
 
 /// Information about a vote that was cast.

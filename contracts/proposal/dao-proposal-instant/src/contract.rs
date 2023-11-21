@@ -24,7 +24,7 @@ use dao_voting::threshold::Threshold;
 use dao_voting::voting::{get_total_power, get_voting_power, validate_voting_period, Vote, Votes};
 
 use crate::msg::MigrateMsg;
-use crate::proposal::{next_proposal_id, SingleChoiceProposal};
+use crate::proposal::{next_proposal_id, SingleChoiceInstantProposal};
 use crate::state::{Config, CREATION_POLICY};
 
 use crate::v1_state::{
@@ -69,11 +69,8 @@ pub fn instantiate(
     let config = Config {
         threshold: msg.threshold,
         max_voting_period,
-        min_voting_period,
         only_members_execute: msg.only_members_execute,
         dao: dao.clone(),
-        allow_revoting: msg.allow_revoting,
-        close_proposal_on_execution_failure: msg.close_proposal_on_execution_failure,
     };
 
     // Initialize proposal count to zero so that queries return zero
@@ -116,21 +113,15 @@ pub fn execute(
         ExecuteMsg::UpdateConfig {
             threshold,
             max_voting_period,
-            min_voting_period,
             only_members_execute,
-            allow_revoting,
             dao,
-            close_proposal_on_execution_failure,
         } => execute_update_config(
             deps,
             info,
             threshold,
             max_voting_period,
-            min_voting_period,
             only_members_execute,
-            allow_revoting,
             dao,
-            close_proposal_on_execution_failure,
         ),
         ExecuteMsg::UpdatePreProposeInfo { info: new_info } => {
             execute_update_proposal_creation_policy(deps, info, new_info)
@@ -148,6 +139,7 @@ pub fn execute(
     }
 }
 
+// @todo: this should implement execute_vote() workflow
 pub fn execute_propose(
     deps: DepsMut,
     env: Env,
@@ -200,19 +192,16 @@ pub fn execute_propose(
 
     let proposal = {
         // Limit mutability to this block.
-        let mut proposal = SingleChoiceProposal {
+        let mut proposal = SingleChoiceInstantProposal {
             title,
             description,
             proposer: proposer.clone(),
             start_height: env.block.height,
-            min_voting_period: config.min_voting_period.map(|min| min.after(&env.block)),
-            expiration,
             threshold: config.threshold,
             total_power,
             msgs,
             status: Status::Open,
             votes: Votes::zero(),
-            allow_revoting: config.allow_revoting,
         };
         // Update the proposal's status. Addresses case where proposal
         // expires on the same block as it is created.
@@ -255,6 +244,7 @@ pub fn execute_propose(
         .add_attribute("status", proposal.status.to_string()))
 }
 
+// @todo: this should be deprecated and its logic implemented in execute_proposal()
 pub fn execute_execute(
     deps: DepsMut,
     env: Env,
@@ -300,14 +290,10 @@ pub fn execute_execute(
                 })?,
                 funds: vec![],
             };
-            match config.close_proposal_on_execution_failure {
-                true => {
-                    let masked_proposal_id = mask_proposal_execution_proposal_id(proposal_id);
-                    Response::default()
-                        .add_submessage(SubMsg::reply_on_error(execute_message, masked_proposal_id))
-                }
-                false => Response::default().add_message(execute_message),
-            }
+            // add submessage to close the proposal on failure
+            let masked_proposal_id = mask_proposal_execution_proposal_id(proposal_id);
+            Response::default()
+                .add_submessage(SubMsg::reply_on_error(execute_message, masked_proposal_id))
         } else {
             Response::default()
         }
@@ -364,17 +350,6 @@ pub fn execute_vote(
         .may_load(deps.storage, proposal_id)?
         .ok_or(ContractError::NoSuchProposal { id: proposal_id })?;
 
-    // Allow voting on proposals until they expire.
-    // Voting on a non-open proposal will never change
-    // their outcome as if an outcome has been determined,
-    // it is because no possible sequence of votes may
-    // cause a different one. This then serves to allow
-    // for better tallies of opinions in the event that a
-    // proposal passes or is rejected early.
-    if prop.expiration.is_expired(&env.block) {
-        return Err(ContractError::Expired { id: proposal_id });
-    }
-
     let vote_power = get_voting_power(
         deps.as_ref(),
         info.sender.clone(),
@@ -386,30 +361,7 @@ pub fn execute_vote(
     }
 
     BALLOTS.update(deps.storage, (proposal_id, &info.sender), |bal| match bal {
-        Some(current_ballot) => {
-            if prop.allow_revoting {
-                if current_ballot.vote == vote {
-                    // Don't allow casting the same vote more than
-                    // once. This seems liable to be confusing
-                    // behavior.
-                    Err(ContractError::AlreadyCast {})
-                } else {
-                    // Remove the old vote if this is a re-vote.
-                    prop.votes
-                        .remove_vote(current_ballot.vote, current_ballot.power);
-                    Ok(Ballot {
-                        power: vote_power,
-                        vote,
-                        // Roll over the previous rationale. If
-                        // you're changing your vote, you've also
-                        // likely changed your thinking.
-                        rationale: rationale.clone(),
-                    })
-                }
-            } else {
-                Err(ContractError::AlreadyVoted {})
-            }
-        }
+        Some(current_ballot) => Err(ContractError::AlreadyVoted {}),
         None => Ok(Ballot {
             power: vote_power,
             vote,
@@ -545,11 +497,8 @@ pub fn execute_update_config(
     info: MessageInfo,
     threshold: Threshold,
     max_voting_period: Duration,
-    min_voting_period: Option<Duration>,
     only_members_execute: bool,
-    allow_revoting: bool,
     dao: String,
-    close_proposal_on_execution_failure: bool,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
@@ -560,19 +509,15 @@ pub fn execute_update_config(
     threshold.validate()?;
     let dao = deps.api.addr_validate(&dao)?;
 
-    let (min_voting_period, max_voting_period) =
-        validate_voting_period(min_voting_period, max_voting_period)?;
+    let max_voting_period = validate_voting_period(max_voting_period)?; // @todo: fix this, hardcode or either fork the function, it is inside an external package
 
     CONFIG.save(
         deps.storage,
         &Config {
             threshold,
             max_voting_period,
-            min_voting_period,
             only_members_execute,
-            allow_revoting,
             dao,
-            close_proposal_on_execution_failure,
         },
     )?;
 
@@ -766,7 +711,7 @@ pub fn query_list_proposals(
     let props: Vec<ProposalResponse> = PROPOSALS
         .range(deps.storage, min, None, cosmwasm_std::Order::Ascending)
         .take(limit as usize)
-        .collect::<Result<Vec<(u64, SingleChoiceProposal)>, _>>()?
+        .collect::<Result<Vec<(u64, SingleChoiceInstantProposal)>, _>>()?
         .into_iter()
         .map(|(id, proposal)| proposal.into_response(&env.block, id))
         .collect();
@@ -785,7 +730,7 @@ pub fn query_reverse_proposals(
     let props: Vec<ProposalResponse> = PROPOSALS
         .range(deps.storage, None, max, cosmwasm_std::Order::Descending)
         .take(limit as usize)
-        .collect::<Result<Vec<(u64, SingleChoiceProposal)>, _>>()?
+        .collect::<Result<Vec<(u64, SingleChoiceInstantProposal)>, _>>()?
         .into_iter()
         .map(|(id, proposal)| proposal.into_response(&env.block, id))
         .collect();
@@ -875,11 +820,8 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
                 &Config {
                     threshold: v1_threshold_to_v2(current_config.threshold),
                     max_voting_period: v1_duration_to_v2(current_config.max_voting_period),
-                    min_voting_period: current_config.min_voting_period.map(v1_duration_to_v2),
                     only_members_execute: current_config.only_members_execute,
-                    allow_revoting: current_config.allow_revoting,
                     dao: current_config.dao.clone(),
-                    close_proposal_on_execution_failure,
                 },
             )?;
 
@@ -911,19 +853,16 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
                         return Err(ContractError::PendingProposals {});
                     }
 
-                    let migrated_proposal = SingleChoiceProposal {
+                    let migrated_proposal = SingleChoiceInstantProposal {
                         title: prop.title,
                         description: prop.description,
                         proposer: prop.proposer,
                         start_height: prop.start_height,
-                        min_voting_period: prop.min_voting_period.map(v1_expiration_to_v2),
-                        expiration: v1_expiration_to_v2(prop.expiration),
                         threshold: v1_threshold_to_v2(prop.threshold),
                         total_power: prop.total_power,
                         msgs: prop.msgs,
                         status: v1_status_to_v2(prop.status),
                         votes: v1_votes_to_v2(prop.votes),
-                        allow_revoting: prop.allow_revoting,
                     };
 
                     PROPOSALS
