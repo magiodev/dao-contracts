@@ -80,10 +80,6 @@ pub enum ExecuteMsg {
         /// The new proposal passing threshold. This will only apply
         /// to proposals created after the config update.
         threshold: Threshold,
-        /// The default maximum amount of time a proposal may be voted
-        /// on before expiring. This will only apply to proposals
-        /// created after the config update.
-        max_voting_period: Duration,
         /// If set to true only members may execute passed
         /// proposals. Otherwise, any address may execute a passed
         /// proposal. Applies to all outstanding and future proposals.

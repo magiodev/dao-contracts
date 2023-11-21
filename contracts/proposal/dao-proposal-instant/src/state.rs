@@ -26,9 +26,6 @@ pub struct Ballot {
 pub struct Config {
     /// The threshold a proposal must reach to complete.
     pub threshold: Threshold,
-    /// The default maximum amount of time a proposal may be voted on
-    /// before expiring.
-    pub max_voting_period: Duration,
     /// If set to true only members may execute passed
     /// proposals. Otherwise, any address may execute a passed
     /// proposal.

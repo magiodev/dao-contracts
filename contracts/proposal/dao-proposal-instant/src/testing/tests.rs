@@ -573,7 +573,6 @@ fn test_update_config() {
                 threshold: Threshold::AbsoluteCount {
                     threshold: Uint128::new(10_000),
                 },
-                max_voting_period: Duration::Height(6),
                 only_members_execute: true,
                 dao: core_addr.to_string(),
             })
@@ -598,7 +597,6 @@ fn test_update_config() {
             threshold: Threshold::AbsoluteCount {
                 threshold: Uint128::new(10_000)
             },
-            max_voting_period: Duration::Height(6),
             only_members_execute: true,
             dao: core_addr.clone(),
         }
@@ -613,7 +611,6 @@ fn test_update_config() {
                 threshold: Threshold::AbsoluteCount {
                     threshold: Uint128::new(10_000),
                 },
-                max_voting_period: Duration::Height(6),
                 only_members_execute: true,
                 dao: core_addr.to_string(),
             },
@@ -988,26 +985,6 @@ fn test_active_threshold_percent() {
 }
 
 #[test]
-#[should_panic(
-    expected = "min_voting_period and max_voting_period must have the same units (height or time)"
-)]
-fn test_min_duration_unit_missmatch() {
-    let mut app = App::default();
-    let mut instantiate = get_default_token_dao_proposal_module_instantiate(&mut app);
-    instantiate.min_voting_period = Some(Duration::Height(10));
-    instantiate_with_staked_balances_governance(&mut app, instantiate, None);
-}
-
-#[test]
-#[should_panic(expected = "Min voting period must be less than or equal to max voting period")]
-fn test_min_duration_larger_than_proposal_duration() {
-    let mut app = App::default();
-    let mut instantiate = get_default_token_dao_proposal_module_instantiate(&mut app);
-    instantiate.min_voting_period = Some(Duration::Time(604801));
-    instantiate_with_staked_balances_governance(&mut app, instantiate, None);
-}
-
-#[test]
 fn test_min_voting_period_no_early_pass() {
     let mut app = App::default();
     let mut instantiate = get_default_token_dao_proposal_module_instantiate(&mut app);
@@ -1030,44 +1007,6 @@ fn test_min_voting_period_no_early_pass() {
     assert_eq!(proposal_response.proposal.status, Status::Open);
 
     app.update_block(|block| block.height += 10);
-    let proposal_response = query_proposal(&app, &proposal_module, proposal_id);
-    assert_eq!(proposal_response.proposal.status, Status::Passed);
-}
-
-// Setting the min duration the same as the proposal duration just
-// means that proposals cant close early.
-#[test]
-fn test_min_duration_same_as_proposal_duration() {
-    let mut app = App::default();
-    let mut instantiate = get_default_token_dao_proposal_module_instantiate(&mut app);
-    instantiate.min_voting_period = Some(Duration::Height(100));
-    instantiate.max_voting_period = Duration::Height(100);
-    let core_addr = instantiate_with_staked_balances_governance(
-        &mut app,
-        instantiate,
-        Some(vec![
-            Cw20Coin {
-                address: "ekez".to_string(),
-                amount: Uint128::new(10),
-            },
-            Cw20Coin {
-                address: "whale".to_string(),
-                amount: Uint128::new(90),
-            },
-        ]),
-    );
-    let gov_token = query_dao_token(&app, &core_addr);
-    let proposal_module = query_single_proposal_module(&app, &core_addr);
-
-    mint_cw20s(&mut app, &gov_token, &core_addr, "ekez", 10_000_000);
-    let proposal_id = make_proposal(&mut app, &proposal_module, "ekez", vec![]);
-
-    // Whale votes yes. Normally the proposal would just pass and ekez
-    // would be out of luck.
-    vote_on_proposal(&mut app, &proposal_module, "whale", proposal_id, Vote::Yes);
-    vote_on_proposal(&mut app, &proposal_module, "ekez", proposal_id, Vote::No);
-
-    app.update_block(|b| b.height += 100);
     let proposal_response = query_proposal(&app, &proposal_module, proposal_id);
     assert_eq!(proposal_response.proposal.status, Status::Passed);
 }
@@ -1168,7 +1107,6 @@ fn test_allow_revoting_config_changes() {
                 quorum: PercentageThreshold::Percent(Decimal::percent(15)),
                 threshold: PercentageThreshold::Majority {},
             },
-            max_voting_period: Duration::Height(10),
             only_members_execute: true,
             dao: core_addr.to_string(),
         },
@@ -1757,7 +1695,6 @@ fn test_migrate_from_v1() {
             threshold: Threshold::AbsolutePercentage {
                 percentage: PercentageThreshold::Majority {}
             },
-            max_voting_period: Duration::Height(6),
             only_members_execute: false,
             dao: core_addr.clone(),
         }
@@ -1886,7 +1823,6 @@ fn test_execution_failed() {
         proposal_module.clone(),
         &ExecuteMsg::UpdateConfig {
             threshold: config.threshold,
-            max_voting_period: config.max_voting_period,
             only_members_execute: config.only_members_execute,
             dao: config.dao.into_string(),
         },

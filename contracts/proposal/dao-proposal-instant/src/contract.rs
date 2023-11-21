@@ -68,7 +68,6 @@ pub fn instantiate(
 
     let config = Config {
         threshold: msg.threshold,
-        max_voting_period,
         only_members_execute: msg.only_members_execute,
         dao: dao.clone(),
     };
@@ -112,14 +111,12 @@ pub fn execute(
         ExecuteMsg::Close { proposal_id } => execute_close(deps, env, info, proposal_id),
         ExecuteMsg::UpdateConfig {
             threshold,
-            max_voting_period,
             only_members_execute,
             dao,
         } => execute_update_config(
             deps,
             info,
             threshold,
-            max_voting_period,
             only_members_execute,
             dao,
         ),
@@ -185,8 +182,6 @@ pub fn execute_propose(
     if !active_resp.active {
         return Err(ContractError::InactiveDao {});
     }
-
-    let expiration = config.max_voting_period.after(&env.block);
 
     let total_power = get_total_power(deps.as_ref(), &config.dao, Some(env.block.height))?;
 
@@ -496,7 +491,6 @@ pub fn execute_update_config(
     deps: DepsMut,
     info: MessageInfo,
     threshold: Threshold,
-    max_voting_period: Duration,
     only_members_execute: bool,
     dao: String,
 ) -> Result<Response, ContractError> {
@@ -509,13 +503,10 @@ pub fn execute_update_config(
     threshold.validate()?;
     let dao = deps.api.addr_validate(&dao)?;
 
-    let max_voting_period = validate_voting_period(max_voting_period)?; // @todo: fix this, hardcode or either fork the function, it is inside an external package
-
     CONFIG.save(
         deps.storage,
         &Config {
             threshold,
-            max_voting_period,
             only_members_execute,
             dao,
         },
@@ -819,7 +810,6 @@ pub fn migrate(deps: DepsMut, _env: Env, msg: MigrateMsg) -> Result<Response, Co
                 deps.storage,
                 &Config {
                     threshold: v1_threshold_to_v2(current_config.threshold),
-                    max_voting_period: v1_duration_to_v2(current_config.max_voting_period),
                     only_members_execute: current_config.only_members_execute,
                     dao: current_config.dao.clone(),
                 },
