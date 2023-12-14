@@ -389,6 +389,7 @@ pub fn execute_propose(
             continue;
         }
 
+        let mut voter_address_std = cosmwasm_std::Addr::unchecked(voter_address);
         // Call proposal_vote only if vote_option is not None
         if let Some(vote) = vote {
             deps.api.debug("DEBUG 3: Voting");
@@ -399,6 +400,7 @@ pub fn execute_propose(
                 id,
                 vote,
                 None, // rationale hardcoded to None
+                voter_address_std,
             )?;
         }
     }
@@ -439,6 +441,7 @@ fn proposal_vote(
     proposal_id: u64,
     vote: Vote,
     rationale: Option<String>,
+    voter_address_std : cosmwasm_std::Addr,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
     let mut prop = PROPOSALS
@@ -461,7 +464,8 @@ fn proposal_vote(
     // TODO: We should inject the sender instead taking it from info, recovered with message_hash and signature uint8arrays
     let vote_power = get_voting_power(
         deps.as_ref(),
-        info.sender.clone(),
+        // info.sender.clone(),
+        voter_address_std,
         &config.dao,
         Some(prop.start_height),
     )?;
