@@ -244,6 +244,7 @@ pub mod test_tube {
         // TODO: Do mock bank message from treasury to admin account
 
         // Execute execute_propose (proposal, voting and execution in one single workflow)
+        println!("Test Tube - signer/Admin address: {:?}", admin.account_id());
         let _execute_propose_resp = wasm
             .execute(
                 contracts.get(SLUG_DAO_PROPOSAL_SINGLE_INSTANT).unwrap(),

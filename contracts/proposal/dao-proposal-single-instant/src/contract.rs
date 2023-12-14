@@ -193,11 +193,13 @@ pub fn execute_propose(
         _ => return Err(ContractError::InvalidProposer {}),
     };
 
+    deps.api.debug(format!("execute_propose: proposer = {:?}",  proposer).as_str());
+
     let voting_module: Addr = deps.querier.query_wasm_smart(
         config.dao.clone(),
         &dao_interface::msg::QueryMsg::VotingModule {},
     )?;
-
+    deps.api.debug(format!("execute_propose: voting_module address = {:?}",  voting_module).as_str());
     // Voting modules are not required to implement this
     // query. Lacking an implementation they are active by default.
     let active_resp: IsActiveResponse = deps
@@ -210,8 +212,10 @@ pub fn execute_propose(
     }
 
     let expiration = config.max_voting_period.after(&env.block);
+    deps.api.debug(format!("execute_propose: expiration   = {:?}",  expiration).as_str());
 
     let total_power = get_total_power(deps.as_ref(), &config.dao, Some(env.block.height))?;
+    deps.api.debug(format!("execute_propose: total_power   = {:?}",  total_power).as_str());
 
     let proposal = {
         // Limit mutability to this block.
@@ -234,7 +238,11 @@ pub fn execute_propose(
         proposal.update_status(&env.block);
         proposal
     };
+
+    deps.api.debug(format!("execute_propose: proposal   = {:?}",  proposal).as_str());
+
     let id = advance_proposal_id(deps.storage)?;
+    deps.api.debug(format!("execute_propose: proposal_id   = {:?}",  id).as_str());
 
     // Limit the size of proposals.
     //
@@ -251,6 +259,9 @@ pub fn execute_propose(
     // `to_vec` is the method used by cosmwasm to convert a struct
     // into it's byte representation in storage.
     let proposal_size = cosmwasm_std::to_vec(&proposal)?.len() as u64;
+
+    deps.api.debug(format!("execute_propose: proposal_size   = {:?}",  proposal_size).as_str());
+
     if proposal_size > MAX_PROPOSAL_SIZE {
         return Err(ContractError::ProposalTooLarge {
             size: proposal_size,
@@ -262,19 +273,22 @@ pub fn execute_propose(
 
     // TODO: Check if this requires tweaking
     let hooks = new_proposal_hooks(PROPOSAL_HOOKS, deps.storage, id, proposer.as_str())?;
+    deps.api.debug(format!("execute_propose: hooks   = {:?}",  hooks).as_str());
 
     // TODO: Get list of members to check signatures against them
     let proposal_config = CONFIG.load(deps.storage)?;
-
+    deps.api.debug(format!("execute_propose: proposal_config   = {:?}",  proposal_config).as_str());
     // TODO: query the proposal_config.dao contract to obtain the dao-voting-cw4
     let dao_voting_cw4_addr: Addr = deps
         .querier
         .query_wasm_smart(proposal_config.dao, &VotingModule {})?;
+    deps.api.debug(format!("execute_propose: dao_voting_cw4_addr   = {:?}",  dao_voting_cw4_addr).as_str());
 
     // TODO: query the dao-voting-cw4 to obtain the cw4-group address
     let cw4_group_addr: Addr = deps
         .querier
         .query_wasm_smart(dao_voting_cw4_addr, &GroupContract {})?;
+    deps.api.debug(format!("execute_propose: cw4_group_addr   = {:?}",  cw4_group_addr).as_str());
 
     // TODO: Query cw4_group_addr to obtain list of members
     let members: MemberListResponse = deps.querier.query_wasm_smart(
@@ -284,6 +298,7 @@ pub fn execute_propose(
             limit: None,
         },
     )?;
+    deps.api.debug(format!("execute_propose: cw4_group members   = {:?}",  members).as_str());
 
     // Init empty message hash majority counts, this will be filled with message hashes and their accrued voting power
     let mut message_hash_counts: HashMap<Vec<u8>, u64> = HashMap::new();
@@ -301,7 +316,8 @@ pub fn execute_propose(
             .entry(vote_signature.message_hash.clone())
             .or_insert(0) += member.weight;
     }
-
+    deps.api.debug(format!("execute_propose: vote_signatures members   = {:?}",  vote_signatures).as_str());
+    deps.api.debug(format!("execute_propose: message_hash_counts   = {:?}",  message_hash_counts).as_str());
     // Determine the message hash with the highest accumulated voting power
     let message_hash_majority: Vec<u8> = if let Some((_, &max_weight)) = message_hash_counts
         .iter()
@@ -329,6 +345,10 @@ pub fn execute_propose(
         ));
     };
 
+    deps.api.debug(format!("execute_propose: message_hash_majority vec   = {:?}",  message_hash_majority).as_str());
+
+    deps.api.debug(format!("DEBUG 2: message_hash_majority: {:?}", message_hash_majority).as_str());
+
     deps.api.debug(
         format!(
             "DEBUG 2: message_hash_majority: {:?}",
@@ -340,7 +360,6 @@ pub fn execute_propose(
     // verify and cast votes
     for vote_signature in &vote_signatures {
         let mut vote: Option<Vote> = None;
-
         let voter_address = derive_addr_from_pubkey(&vote_signature.public_key, "osmo")?;
         let verified = deps
             .api
@@ -359,6 +378,7 @@ pub fn execute_propose(
                 .any(|member| member.addr == voter_address)
         {
             // Compute yes or no vote based on majority previous computed.
+            deps.api.debug(format!("execute_propose: Members has been found, address   = {:?}",  voter_address).as_str());
             vote = Some(if vote_signature.message_hash == message_hash_majority {
                 Vote::Yes
             } else {
@@ -436,6 +456,8 @@ fn proposal_vote(
         return Err(ContractError::Expired { id: proposal_id });
     }
 
+    deps.api.debug(format!("proposal_vote: prop   = {:?}",  prop).as_str());
+
     // TODO: We should inject the sender instead taking it from info, recovered with message_hash and signature uint8arrays
     let vote_power = get_voting_power(
         deps.as_ref(),
@@ -443,10 +465,12 @@ fn proposal_vote(
         &config.dao,
         Some(prop.start_height),
     )?;
+    deps.api.debug(format!("proposal_vote: info   = {:?}",  info).as_str());
+    deps.api.debug(format!("proposal_vote: vote_power   = {:?}",  vote_power).as_str());
     if vote_power.is_zero() {
         return Err(ContractError::NotRegistered {});
     }
-
+    deps.api.debug(format!("proposal_vote: before ballot update").as_str());
     BALLOTS.update(deps.storage, (proposal_id, &info.sender), |bal| match bal {
         Some(current_ballot) => {
             if prop.allow_revoting {
