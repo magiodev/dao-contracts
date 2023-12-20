@@ -7,7 +7,7 @@ use dao_voting::{pre_propose::ProposalCreationPolicy, threshold::Threshold, voti
 
 use crate::proposal::SingleChoiceInstantPropose;
 
-/// A vote cast for an instant proposal containing message_hash and message_signature.
+/// A vote message containing a nonce and the cosmos msg for the proposal to execute
 #[cw_serde]
 pub struct VoteMsg {
     pub nonce: String,

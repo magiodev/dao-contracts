@@ -200,7 +200,7 @@ pub fn execute_propose(
             }
         }
 
-        // Save the used nonce TODO probably we want to move this outside this scope and do that after the proposal execution? evaluate
+        // Save the used nonce
         PROPOSAL_NONCES
             .save(deps.storage, &proposal_msg.nonce, &true)
             .unwrap();
