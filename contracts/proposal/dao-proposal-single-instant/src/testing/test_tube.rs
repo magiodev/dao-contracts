@@ -16,7 +16,7 @@ pub mod test_tube {
         MsgSend, QueryBalanceRequest,
     };
     use osmosis_test_tube::osmosis_std::types::cosmos::base::v1beta1;
-    use osmosis_test_tube::RunnerError::{ExecuteError, self};
+    use osmosis_test_tube::RunnerError::{self, ExecuteError};
     use osmosis_test_tube::{Account, Bank};
     use osmosis_test_tube::{Module, OsmosisTestApp, SigningAccount, Wasm};
     use std::collections::HashMap;
@@ -381,7 +381,7 @@ pub mod test_tube {
 
         // Create proposal execute msg as bank message from treasury back to the admin account
         let bank_send_amount = 1000u128;
-        let execute_propose_msg = VoteMsg {
+        let mut execute_propose_msg = VoteMsg {
             nonce: "0123456789".to_string(),
             msg: CosmosMsg::Bank(BankMsg::Send {
                 to_address: admin.address(),
@@ -497,17 +497,60 @@ pub mod test_tube {
                 &ExecuteMsg::Propose(SingleChoiceInstantProposeMsg {
                     title: "Title".to_string(),
                     description: "Description".to_string(),
-                    msgs: vec![execute_propose_msg],
+                    msgs: vec![execute_propose_msg.clone()],
                     proposer: None,
-                    vote_signatures,
+                    vote_signatures: vote_signatures.clone(),
                 }),
                 &vec![],
                 &admin,
             )
             .unwrap_err();
 
-        // Assert that the response is an error of a specific type (e.g., Unauthorized)
-        assert!(matches!(execute_propose_resp, ExecuteError { msg } if msg.contains("failed to execute message; message index: 0: unauthorized: execute wasm contract failed")));
+        // Assert that the response is an error of a specific type (Unauthorized)
+        assert!(
+            matches!(execute_propose_resp, ExecuteError { msg } if msg.contains("failed to execute message; message index: 0: unauthorized: execute wasm contract failed"))
+        );
+
+        // Get treasury balance after replay
+        // here we expect the same balance of before, as the second execution should have been prevented
+        let treasury_balance_after_replay = bank
+            .query_balance(&QueryBalanceRequest {
+                address: contracts
+                    .get(SLUG_DAO_DAO_CORE)
+                    .expect("Treasury address not found")
+                    .clone(),
+                denom: INITIAL_BALANCE_DENOM.to_string(),
+            })
+            .unwrap()
+            .balance
+            .expect("failed to query balance");
+        let treasury_balance_after = treasury_balance_after_replay
+            .amount
+            .parse::<u128>()
+            .expect("Failed to parse after balance");
+        assert_eq!(treasury_balance_after, bank_send_amount);
+
+        // Try to replay by altering the nonce and so skipping the first validation, but same VoteSignatures
+        execute_propose_msg.nonce = "9876543210".to_string();
+        let execute_propose_resp = wasm
+            .execute(
+                contracts.get(SLUG_DAO_PROPOSAL_SINGLE_INSTANT).unwrap(),
+                &ExecuteMsg::Propose(SingleChoiceInstantProposeMsg {
+                    title: "Title".to_string(),
+                    description: "Description".to_string(),
+                    msgs: vec![execute_propose_msg],
+                    proposer: None,
+                    vote_signatures: vote_signatures,
+                }),
+                &vec![],
+                &admin,
+            )
+            .unwrap_err();
+
+        // Assert that the response is an error of a specific type (MessageHashMismatch)
+        assert!(
+            matches!(execute_propose_resp, ExecuteError { msg } if msg.contains("failed to execute message; message index: 0: majority execute message hash mismatch: execute wasm contract failed"))
+        );
 
         // Get treasury balance after replay
         // here we expect the same balance of before, as the second execution should have been prevented
