@@ -1,10 +1,9 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use cosmwasm_std::{CosmosMsg, Empty};
 use cw_utils::Duration;
 use dao_dao_macros::proposal_module_query;
 use dao_voting::{pre_propose::PreProposeInfo, threshold::Threshold};
 
-use crate::state::VoteSignature;
+use crate::state::{VoteMsg, VoteSignature};
 
 #[cw_serde]
 pub struct InstantiateMsg {
@@ -40,7 +39,6 @@ pub struct InstantiateMsg {
     pub close_proposal_on_execution_failure: bool,
 }
 
-/// TODO: Move this outside this module. Try finding the best place to include inside dao_proposal_single_instant
 #[cw_serde]
 pub struct SingleChoiceInstantProposeMsg {
     /// The title of the proposal.
@@ -49,7 +47,7 @@ pub struct SingleChoiceInstantProposeMsg {
     pub description: String,
     /// The messages that should be executed in response to this
     /// proposal passing.
-    pub msgs: Vec<CosmosMsg<Empty>>,
+    pub msgs: Vec<VoteMsg>,
     /// The address creating the proposal. If no pre-propose
     /// module is attached to this module this must always be None
     /// as the proposer is the sender of the propose message. If a

@@ -1,6 +1,6 @@
 use crate::msg::{MigrateMsg, SingleChoiceInstantProposeMsg};
 use crate::proposal::{next_proposal_id, SingleChoiceInstantPropose};
-use crate::state::{Config, VoteSignature, CREATION_POLICY};
+use crate::state::{Config, VoteMsg, VoteSignature, CREATION_POLICY, PROPOSAL_NONCES};
 use crate::v1_state::{
     v1_duration_to_v2, v1_expiration_to_v2, v1_status_to_v2, v1_threshold_to_v2, v1_votes_to_v2,
 };
@@ -163,7 +163,8 @@ pub fn execute_propose(
     info: MessageInfo,
     title: String,
     description: String,
-    msgs: Vec<CosmosMsg<Empty>>,
+    //msgs: Vec<CosmosMsg<Empty>>,
+    msgs: Vec<VoteMsg>,
     proposer: Option<String>,
     vote_signatures: Vec<VoteSignature>,
 ) -> Result<Response, ContractError> {
@@ -178,6 +179,31 @@ pub fn execute_propose(
     // MVP Limitation: Supporting only one msg per proposal
     if msgs.len() > 1 {
         return Err(ContractError::TooManyMsgs {});
+    }
+
+    // Validate nonce and create a cosmos_msgs vector
+    let mut cosmos_msgs: Vec<CosmosMsg<Empty>> = vec![];
+    if let Some(proposal_msg) = msgs.get(0) {
+        let nonce_result = PROPOSAL_NONCES
+            .may_load(deps.storage, &proposal_msg.nonce)
+            .unwrap();
+
+        match nonce_result {
+            Some(_) => {
+                // If the nonce is already used, throw an error indicating unauthorized access.
+                return Err(ContractError::Unauthorized {});
+            }
+            None => {
+                // If the nonce does not exist, proceed to add the message to the cosmos_msgs vector.
+                // This step involves unwrapping the VoteMsg to extract the underlying CosmosMsg.
+                cosmos_msgs.push(proposal_msg.msg.clone());
+            }
+        }
+
+        // Save the used nonce TODO probably we want to move this outside this scope and do that after the proposal execution? evaluate
+        PROPOSAL_NONCES
+            .save(deps.storage, &proposal_msg.nonce, &true)
+            .unwrap();
     }
 
     // TODO: We need a permissioned proposer, probably the admin of the ProposalModule
@@ -231,7 +257,7 @@ pub fn execute_propose(
             expiration,
             threshold: config.threshold,
             total_power,
-            msgs: msgs.clone(),
+            msgs: cosmos_msgs,
             status: Status::Open,
             votes: Votes::zero(),
             allow_revoting: config.allow_revoting,
@@ -286,6 +312,16 @@ pub fn execute_propose(
         *message_hash_counts
             .entry(vote_signature.message_hash.clone())
             .or_insert(Uint128::zero()) += vote_power;
+    }
+
+    // Validate that message_hash_counts contains at least one key with value > 0
+    if !message_hash_counts
+        .values()
+        .any(|&value| value > Uint128::zero())
+    {
+        return Err(ContractError::ThresholdError(
+            ThresholdError::UnreachableThreshold {},
+        ));
     }
 
     // Determine the message hash with the highest accumulated voting power
@@ -386,6 +422,7 @@ pub fn execute_propose(
         let proposal_msg_bytes = to_vec(proposal_msg)?;
         let proposal_msg_hash = compute_sha256_hash(&proposal_msg_bytes);
 
+        // Here we compare the VoteMsg with
         if proposal_msg_hash != message_hash_majority {
             return Err(ContractError::MessageHashMismatch {});
         }
@@ -557,6 +594,11 @@ fn proposal_execute(
             &config.dao,
             Some(prop.start_height),
         )?;
+        // // Exclude strangers and members with voting power to be executing
+        // let is_member = true; // TODO: reimplement members query to cw4-group contract and .find() over vec
+        // if !is_member || !power.is_zero() {
+        //     return Err(ContractError::Unauthorized {});
+        // }
         if power.is_zero() {
             return Err(ContractError::Unauthorized {});
         }

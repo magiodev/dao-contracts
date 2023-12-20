@@ -2,7 +2,7 @@
 pub mod test_tube {
     use crate::contract::compute_sha256_hash;
     use crate::msg::{ExecuteMsg, InstantiateMsg, SingleChoiceInstantProposeMsg};
-    use crate::state::VoteSignature;
+    use crate::state::{VoteMsg, VoteSignature};
     use cosmwasm_std::testing::mock_dependencies;
     use cosmwasm_std::{to_binary, Api, BankMsg, Coin, CosmosMsg, Uint128};
     use cw_utils::Duration;
@@ -16,6 +16,7 @@ pub mod test_tube {
         MsgSend, QueryBalanceRequest,
     };
     use osmosis_test_tube::osmosis_std::types::cosmos::base::v1beta1;
+    use osmosis_test_tube::RunnerError::{ExecuteError, self};
     use osmosis_test_tube::{Account, Bank};
     use osmosis_test_tube::{Module, OsmosisTestApp, SigningAccount, Wasm};
     use std::collections::HashMap;
@@ -30,7 +31,6 @@ pub mod test_tube {
     /// Test constants
     const INITIAL_BALANCE_AMOUNT: u128 = 1_000_000_000_000_000u128;
     const INITIAL_BALANCE_DENOM: &str = "ugov";
-    // const INITIAL_BALANCE_AMOUNT: u128 = 340282366920938463463374607431768211455u128;
 
     pub fn test_init(
         voters_number: u32,
@@ -63,13 +63,18 @@ pub mod test_tube {
         }
 
         // Create a vector of cw4::Member
-        let initial_members = voters
+        let mut initial_members = voters
             .iter()
             .map(|voter| cw4::Member {
                 addr: voter.address().to_string(),
                 weight: 1,
             })
             .collect::<Vec<_>>();
+        // Pushing proposer weight 0 account
+        initial_members.push(cw4::Member {
+            addr: admin.address().to_string(),
+            weight: 1,
+        });
 
         // Contracts to store and instantiate
         let contracts_setup: Vec<(&str, Vec<u8>)> = vec![
@@ -118,7 +123,7 @@ pub mod test_tube {
             // },
             max_voting_period: Duration::Height(1), // 1 block only to make it expire after the proposing block
             min_voting_period: None,
-            only_members_execute: true,
+            only_members_execute: false, // TODO: Check if we want this at true, if yes we should remove the if power.is_zero() throw error from contract.rs
             allow_revoting: false,
             pre_propose_info: PreProposeInfo::AnyoneMayPropose {},
             close_proposal_on_execution_failure: true,
@@ -228,13 +233,16 @@ pub mod test_tube {
 
         // Create proposal execute msg as bank message from treasury back to the admin account
         let bank_send_amount = 1000u128;
-        let execute_propose_msg = CosmosMsg::Bank(BankMsg::Send {
-            to_address: admin.address(),
-            amount: vec![Coin {
-                denom: INITIAL_BALANCE_DENOM.to_string(),
-                amount: Uint128::new(bank_send_amount),
-            }],
-        });
+        let execute_propose_msg = VoteMsg {
+            nonce: "0123456789".to_string(),
+            msg: CosmosMsg::Bank(BankMsg::Send {
+                to_address: admin.address(),
+                amount: vec![Coin {
+                    denom: INITIAL_BALANCE_DENOM.to_string(),
+                    amount: Uint128::new(bank_send_amount),
+                }],
+            }),
+        };
         let execute_propose_msg_binary = to_binary(&execute_propose_msg).unwrap();
 
         // Creating different messages for each voter.
@@ -365,6 +373,164 @@ pub mod test_tube {
 
     #[test]
     #[ignore]
+    /// Test case of a proposal creation, voting passing and executing all-in-once, which should move gov funds from treasury.
+    fn test_dao_proposal_single_instant_ko_replay() {
+        let (app, contracts, admin, voters) = test_init(5);
+        let bank = Bank::new(&app);
+        let wasm = Wasm::new(&app);
+
+        // Create proposal execute msg as bank message from treasury back to the admin account
+        let bank_send_amount = 1000u128;
+        let execute_propose_msg = VoteMsg {
+            nonce: "0123456789".to_string(),
+            msg: CosmosMsg::Bank(BankMsg::Send {
+                to_address: admin.address(),
+                amount: vec![Coin {
+                    denom: INITIAL_BALANCE_DENOM.to_string(),
+                    amount: Uint128::new(bank_send_amount),
+                }],
+            }),
+        };
+        let execute_propose_msg_binary = to_binary(&execute_propose_msg).unwrap();
+
+        // Creating different messages for each voter.
+        // ... add as many messages as there are voters
+        // The number of items of this array should match the test_init({voters_number}) value.
+        let messages: Vec<&[u8]> = vec![
+            execute_propose_msg_binary.as_slice(), // A <- will pass!
+            execute_propose_msg_binary.as_slice(), // A <- will pass!
+            execute_propose_msg_binary.as_slice(), // A <- will pass!
+            b"Hello World!",                       // B
+            b"Hello World!",                       // B
+        ];
+
+        let mut vote_signatures: Vec<VoteSignature> = vec![];
+        for (index, voter) in voters.iter().enumerate() {
+            // Ensure that there's a message for each voter
+            if let Some(clear_message) = messages.get(index) {
+                let message_hash = compute_sha256_hash(clear_message);
+                let signature = voter.signing_key().sign(clear_message).unwrap();
+                // VoteSignature
+                vote_signatures.push(VoteSignature {
+                    message_hash,
+                    signature: signature.as_ref().to_vec(),
+                    public_key: voter.public_key().to_bytes(),
+                });
+            } else {
+                // Do nothing in the case where there's no message for a voter
+            }
+        }
+
+        // Execute bank send from admin to treasury
+        bank.send(
+            MsgSend {
+                from_address: admin.address(),
+                to_address: contracts
+                    .get(SLUG_DAO_DAO_CORE)
+                    .expect("Treasury address not found")
+                    .clone(),
+                amount: vec![v1beta1::Coin {
+                    denom: INITIAL_BALANCE_DENOM.to_string(),
+                    amount: (bank_send_amount * 2).to_string(), // we are senging the amount times 2
+                }],
+            },
+            &admin,
+        )
+        .unwrap();
+
+        // Get treasury balance after send
+        let treasury_balance_after_send = bank
+            .query_balance(&QueryBalanceRequest {
+                address: contracts
+                    .get(SLUG_DAO_DAO_CORE)
+                    .expect("Treasury address not found")
+                    .clone(),
+                denom: INITIAL_BALANCE_DENOM.to_string(),
+            })
+            .unwrap()
+            .balance
+            .expect("failed to query balance");
+        let treasury_balance_after = treasury_balance_after_send
+            .amount
+            .parse::<u128>()
+            .expect("Failed to parse after balance");
+        assert_eq!(treasury_balance_after, bank_send_amount * 2);
+
+        // Execute execute_propose (proposal, voting and execution in one single workflow)
+        let _execute_propose_resp = wasm
+            .execute(
+                contracts.get(SLUG_DAO_PROPOSAL_SINGLE_INSTANT).unwrap(),
+                &ExecuteMsg::Propose(SingleChoiceInstantProposeMsg {
+                    title: "Title".to_string(),
+                    description: "Description".to_string(),
+                    msgs: vec![execute_propose_msg.clone()],
+                    proposer: None,
+                    vote_signatures: vote_signatures.clone(),
+                }),
+                &vec![],
+                &admin,
+            )
+            .unwrap();
+
+        // Get treasury balance after first execution
+        let treasury_balance_after_replay = bank
+            .query_balance(&QueryBalanceRequest {
+                address: contracts
+                    .get(SLUG_DAO_DAO_CORE)
+                    .expect("Treasury address not found")
+                    .clone(),
+                denom: INITIAL_BALANCE_DENOM.to_string(),
+            })
+            .unwrap()
+            .balance
+            .expect("failed to query balance");
+        let treasury_balance_after = treasury_balance_after_replay
+            .amount
+            .parse::<u128>()
+            .expect("Failed to parse after balance");
+        assert_eq!(treasury_balance_after, bank_send_amount);
+
+        // Try to replay with the same exact payload
+        let execute_propose_resp = wasm
+            .execute(
+                contracts.get(SLUG_DAO_PROPOSAL_SINGLE_INSTANT).unwrap(),
+                &ExecuteMsg::Propose(SingleChoiceInstantProposeMsg {
+                    title: "Title".to_string(),
+                    description: "Description".to_string(),
+                    msgs: vec![execute_propose_msg],
+                    proposer: None,
+                    vote_signatures,
+                }),
+                &vec![],
+                &admin,
+            )
+            .unwrap_err();
+
+        // Assert that the response is an error of a specific type (e.g., Unauthorized)
+        assert!(matches!(execute_propose_resp, ExecuteError { msg } if msg.contains("failed to execute message; message index: 0: unauthorized: execute wasm contract failed")));
+
+        // Get treasury balance after replay
+        // here we expect the same balance of before, as the second execution should have been prevented
+        let treasury_balance_after_replay = bank
+            .query_balance(&QueryBalanceRequest {
+                address: contracts
+                    .get(SLUG_DAO_DAO_CORE)
+                    .expect("Treasury address not found")
+                    .clone(),
+                denom: INITIAL_BALANCE_DENOM.to_string(),
+            })
+            .unwrap()
+            .balance
+            .expect("failed to query balance");
+        let treasury_balance_after = treasury_balance_after_replay
+            .amount
+            .parse::<u128>()
+            .expect("Failed to parse after balance");
+        assert_eq!(treasury_balance_after, bank_send_amount);
+    }
+
+    #[test]
+    #[ignore]
     /// TODO: Test case of a proposal failing due to a tie in message_hash_majority computation by voting_power.
     fn test_dao_proposal_single_instant_ko_tie() {
         let (app, contracts, admin, voters) = test_init(5);
@@ -400,26 +566,31 @@ pub mod test_tube {
         }
 
         // Execute execute_propose (proposal, voting and execution in one single workflow)
-        let _execute_propose_resp = wasm
-            .execute(
-                contracts.get(SLUG_DAO_PROPOSAL_SINGLE_INSTANT).unwrap(),
-                &ExecuteMsg::Propose(SingleChoiceInstantProposeMsg {
-                    title: "Title".to_string(),
-                    description: "Description".to_string(),
-                    msgs: vec![],
-                    proposer: None,
-                    vote_signatures,
-                }),
-                &vec![],
-                &admin,
-            );
+        let _execute_propose_resp = wasm.execute(
+            contracts.get(SLUG_DAO_PROPOSAL_SINGLE_INSTANT).unwrap(),
+            &ExecuteMsg::Propose(SingleChoiceInstantProposeMsg {
+                title: "Title".to_string(),
+                description: "Description".to_string(),
+                msgs: vec![],
+                proposer: None,
+                vote_signatures,
+            }),
+            &vec![],
+            &admin,
+        );
 
-         match _execute_propose_resp {
-            Ok(_) => panic!("Expected an error for not reaching the threshold, but the operation succeeded"),
+        match _execute_propose_resp {
+            Ok(_) => panic!(
+                "Expected an error for not reaching the threshold, but the operation succeeded"
+            ),
             Err(e) => {
                 // Check if the error is the expected one
                 let error_message = format!("{:?}", e);
-                assert!(error_message.contains("Not possible to reach required (passing) threshold"), "Unexpected error message: {}", error_message);
+                assert!(
+                    error_message.contains("Not possible to reach required (passing) threshold"),
+                    "Unexpected error message: {}",
+                    error_message
+                );
             }
         }
     }

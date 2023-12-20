@@ -74,7 +74,7 @@ pub(crate) fn make_proposal(
                 &ExecuteMsg::Propose(SingleChoiceInstantProposeMsg {
                     title: "title".to_string(),
                     description: "description".to_string(),
-                    msgs: msgs.clone(),
+                    msgs: todo!(),
                     proposer: None,
                     vote_signatures: vec![VoteSignature {
                         message_hash: todo!(), // TODO

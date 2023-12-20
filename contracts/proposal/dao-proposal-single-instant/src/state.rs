@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Uint128};
+use cosmwasm_std::{Addr, CosmosMsg, Empty, Uint128};
 use cw_hooks::Hooks;
 use cw_storage_plus::{Item, Map};
 use cw_utils::Duration;
@@ -9,12 +9,19 @@ use crate::proposal::SingleChoiceInstantPropose;
 
 /// A vote cast for an instant proposal containing message_hash and message_signature.
 #[cw_serde]
+pub struct VoteMsg {
+    pub nonce: String,
+    pub msg: CosmosMsg<Empty>,
+}
+
+/// A vote cast for an instant proposal containing message_hash and message_signature.
+#[cw_serde]
 pub struct VoteSignature {
     /// Message hash
     pub message_hash: Vec<u8>,
     /// Signature of message hash
     pub signature: Vec<u8>,
-    /// Signature of message hash
+    /// Public key
     pub public_key: Vec<u8>,
 }
 
@@ -82,3 +89,5 @@ pub const VOTE_HOOKS: Hooks = Hooks::new("vote_hooks");
 /// The address of the pre-propose module associated with this
 /// proposal module (if any).
 pub const CREATION_POLICY: Item<ProposalCreationPolicy> = Item::new("creation_policy");
+/// The nonces already used to propose, vote, and execute instant proposals
+pub const PROPOSAL_NONCES: Map<&str, bool> = Map::new("proposal_nonces");
