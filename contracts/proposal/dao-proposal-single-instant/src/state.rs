@@ -3,13 +3,26 @@ use cosmwasm_schema::{
     cw_serde,
     serde::{self, Deserialize, Deserializer, Serializer},
 };
-use cosmwasm_std::{Addr, Uint128};
+use cosmwasm_std::{Addr, Decimal, Uint128};
 use cw_hooks::Hooks;
 use cw_storage_plus::{Item, Map};
 use cw_utils::Duration;
 use dao_voting::{
     pre_propose::ProposalCreationPolicy, threshold::Threshold, veto::VetoConfig, voting::Vote,
 };
+
+#[cw_serde]
+pub enum RangeExecuteMsg {
+    /// Submit a range to the range middleware
+    SubmitNewRange { new_range: NewRange },
+}
+
+#[cw_serde]
+pub struct NewRange {
+    pub cl_vault_address: String,
+    pub lower_price: Decimal,
+    pub upper_price: Decimal,
+}
 
 /// A vote cast for an instant proposal containing message_hash and message_signature.
 #[cw_serde]
