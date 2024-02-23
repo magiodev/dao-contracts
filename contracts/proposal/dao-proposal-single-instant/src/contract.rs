@@ -388,9 +388,9 @@ fn verify_message(
 
 pub fn create_adr36_message(data: &String, signer: &String) -> String {
     let message = format!(
-        "{{\"chain_id\":\"\",\"account_number\":\"0\",\"sequence\":\"0\",\"fee\":{{\"gas\":\"0\",\"amount\":[]}},\"msgs\":[{{\"type\":\"sign/MsgSignData\",\"value\":{{\"signer\":\"{}\",\"data\":\"{}\"}}}}],\"memo\":\"\"}}",
-        signer,
-        base64::encode(data)
+        "{{\"account_number\":\"0\",\"chain_id\":\"\",\"fee\":{{\"amount\":[],\"gas\":\"0\"}},\"memo\":\"\",\"msgs\":[{{\"type\":\"sign/MsgSignData\",\"value\":{{\"data\":\"{}\",\"signer\":\"{}\"}}}}],\"sequence\":\"0\"}}",
+        base64::encode(data),
+        signer
     );
 
     message
