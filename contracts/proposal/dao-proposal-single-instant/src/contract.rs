@@ -182,6 +182,11 @@ pub fn execute_propose(
         return Err(ContractError::Unauthorized {});
     }
 
+    // We want at least one message to execute
+    if msgs.len() < 1 {
+        return Err(ContractError::NotEnoughMsgs {});
+    }
+
     // MVP Limitation: Supporting only one msg per proposal
     if msgs.len() > 1 {
         return Err(ContractError::TooManyMsgs {});

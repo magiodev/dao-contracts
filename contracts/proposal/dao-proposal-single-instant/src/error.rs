@@ -23,11 +23,11 @@ pub enum ContractError {
     #[error("unauthorized")]
     Unauthorized {},
 
-    #[error("too many msgs")]
-    TooManyMsgs {},
+    #[error("not enough proposal msgs")]
+    NotEnoughMsgs {},
 
-    #[error("majority execute message hash mismatch")]
-    MessageHashMismatch {},
+    #[error("too many proposal msgs")]
+    TooManyMsgs {},
 
     #[error(transparent)]
     ThresholdError(#[from] dao_voting::threshold::ThresholdError),
