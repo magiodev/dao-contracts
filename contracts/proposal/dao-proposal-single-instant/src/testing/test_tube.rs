@@ -442,7 +442,6 @@ pub mod test_tube {
                 &admin,
             )
             .unwrap_err();
-        println!("execute_propose_resp {:?}", execute_propose_resp);
 
         // Assert that the response is an error of a specific type
         assert!(
@@ -514,7 +513,6 @@ pub mod test_tube {
                 &voters.get(0).unwrap(), // using first voter instead of admin to vote as member with voting power > 0
             )
             .unwrap_err();
-        println!("execute_propose_resp {:?}", execute_propose_resp);
 
         // Assert that the response is an error of a specific type (Unauthorized)
         assert!(
