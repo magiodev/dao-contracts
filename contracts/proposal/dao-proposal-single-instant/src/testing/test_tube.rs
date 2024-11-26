@@ -20,8 +20,9 @@ pub mod test_tube {
     use std::path::PathBuf;
 
     use crate::contract::{compute_sha256_hash, create_adr36_message};
-    use crate::msg::{ExecuteMsg, InstantiateMsg, SingleChoiceInstantProposalMsg};
-    use crate::state::VoteSignature;
+    use crate::msg::{
+        ExecuteMsg, InstantiateMsg, ProposalPayload, SingleChoiceInstantProposalMsg, VoteSignature,
+    };
 
     /// Init constants
     const SLUG_DAO_DAO_CORE: &str = "dao_dao_core";
@@ -32,6 +33,7 @@ pub mod test_tube {
     /// Test constants
     const INITIAL_BALANCE_AMOUNT: u128 = 1_000_000_000_000_000u128;
     const INITIAL_BALANCE_DENOM: &str = "ugov";
+    pub const NONCE: &str = "123456";
 
     pub fn test_init(
         voters_number: u32,
@@ -233,59 +235,8 @@ pub mod test_tube {
         let bank = Bank::new(&app);
         let wasm = Wasm::new(&app);
 
-        // Create proposal execute msg as bank message from treasury back to the admin account
-        let bank_send_amount = 1000u128;
-        let execute_propose_msg_pass: CosmosMsg = CosmosMsg::Bank(BankMsg::Send {
-            to_address: admin.address(),
-            amount: vec![Coin {
-                denom: INITIAL_BALANCE_DENOM.to_string(),
-                amount: Uint128::new(bank_send_amount),
-            }],
-        });
-
-        let execute_propose_msg_fail: CosmosMsg = CosmosMsg::Bank(BankMsg::Send {
-            to_address: admin.address(),
-            amount: vec![Coin {
-                denom: INITIAL_BALANCE_DENOM.to_string(),
-                amount: Uint128::new(bank_send_amount * 2),
-            }],
-        });
-
-        // Creating different messages for each voter.
-        // The number of items of this array should match the test_init({voters_number}) value.
-        let messages: Vec<&CosmosMsg> = vec![
-            &execute_propose_msg_pass, // A <- will pass! 1/2 majority
-            &execute_propose_msg_pass, // A <- will pass! 2/2 majority
-            &execute_propose_msg_fail, // B <- all the rest doesnt count
-            &execute_propose_msg_fail, // B
-            &execute_propose_msg_fail, // B
-        ];
-
-        let mut vote_signatures: Vec<VoteSignature> = vec![];
-        for (index, voter) in voters.iter().enumerate() {
-            // Ensure that there's a message for each voter
-            if let Some(clear_message) = messages.get(index) {
-                let clear_message_adr = create_adr36_message(
-                    &to_json_string(&clear_message).unwrap(),
-                    &voter.address(),
-                );
-                let message_hash = compute_sha256_hash(clear_message_adr.as_bytes());
-                let signature = voter
-                    .signing_key()
-                    .sign(clear_message_adr.as_bytes())
-                    .unwrap();
-                // VoteSignature
-                vote_signatures.push(VoteSignature {
-                    message_hash,
-                    signature: signature.as_ref().to_vec(),
-                    public_key: voter.public_key().to_bytes(),
-                });
-            } else {
-                // Do nothing in the case where there's no message for a voter
-            }
-        }
-
         // Get Admin balance before send
+        let bank_send_amount = 1000u128;
         let admin_balance_before = bank
             .query_balance(&QueryBalanceRequest {
                 address: admin.address(),
@@ -349,6 +300,75 @@ pub mod test_tube {
             .expect("Failed to parse after balance");
         assert!(treasury_balance_after == bank_send_amount);
 
+        // Create proposal execute msg as bank message from treasury back to the admin account
+        let execute_propose_msg_pass: CosmosMsg = CosmosMsg::Bank(BankMsg::Send {
+            to_address: admin.address(),
+            amount: vec![Coin {
+                denom: INITIAL_BALANCE_DENOM.to_string(),
+                amount: Uint128::new(bank_send_amount),
+            }],
+        });
+
+        let execute_propose_msg_fail: CosmosMsg = CosmosMsg::Bank(BankMsg::Send {
+            to_address: admin.address(),
+            amount: vec![Coin {
+                denom: INITIAL_BALANCE_DENOM.to_string(),
+                amount: Uint128::new(bank_send_amount * 2),
+            }],
+        });
+
+        // Creating different messages for each voter.
+        // The number of items of this array should match the test_init({voters_number}) value.
+        let payloads: Vec<ProposalPayload> = vec![
+            // A <- will pass! 1/2 majority
+            ProposalPayload {
+                msgs: vec![execute_propose_msg_pass.clone()],
+                nonce: NONCE.to_string(),
+            },
+            // A <- will pass! 2/2 majority
+            ProposalPayload {
+                msgs: vec![execute_propose_msg_pass.clone()],
+                nonce: NONCE.to_string(),
+            },
+            // B <- all the rest doesnt count
+            ProposalPayload {
+                msgs: vec![execute_propose_msg_fail.clone()],
+                nonce: NONCE.to_string(),
+            },
+            ProposalPayload {
+                msgs: vec![execute_propose_msg_fail.clone()],
+                nonce: NONCE.to_string(),
+            },
+            ProposalPayload {
+                msgs: vec![execute_propose_msg_fail.clone()],
+                nonce: NONCE.to_string(),
+            },
+        ];
+
+        let mut vote_signatures: Vec<VoteSignature> = vec![];
+        for (index, voter) in voters.iter().enumerate() {
+            // Ensure that there's a message for each voter
+            if let Some(clear_message) = payloads.get(index) {
+                let clear_message_adr = create_adr36_message(
+                    &to_json_string(&clear_message).unwrap(),
+                    &voter.address(),
+                );
+                let message_hash = compute_sha256_hash(clear_message_adr.as_bytes());
+                let signature = voter
+                    .signing_key()
+                    .sign(clear_message_adr.as_bytes())
+                    .unwrap();
+                // VoteSignature
+                vote_signatures.push(VoteSignature {
+                    message_hash,
+                    signature: signature.as_ref().to_vec(),
+                    public_key: voter.public_key().to_bytes(),
+                });
+            } else {
+                // Do nothing in the case where there's no message for a voter
+            }
+        }
+
         // Execute execute_propose (proposal, voting and execution in one single workflow)
         let _execute_propose_resp = wasm
             .execute(
@@ -356,7 +376,10 @@ pub mod test_tube {
                 &ExecuteMsg::Propose(SingleChoiceInstantProposalMsg {
                     title: "Title".to_string(),
                     description: "Description".to_string(),
-                    msgs: vec![execute_propose_msg_pass],
+                    payload: ProposalPayload {
+                        msgs: vec![execute_propose_msg_pass.clone()],
+                        nonce: NONCE.to_string(),
+                    },
                     proposer: None,
                     vote_signatures,
                 }),
@@ -434,7 +457,10 @@ pub mod test_tube {
                 &ExecuteMsg::Propose(SingleChoiceInstantProposalMsg {
                     title: "Title".to_string(),
                     description: "Description".to_string(),
-                    msgs: vec![execute_propose_msg],
+                    payload: ProposalPayload {
+                        msgs: vec![execute_propose_msg.clone()],
+                        nonce: NONCE.to_string(),
+                    },
                     proposer: None,
                     vote_signatures,
                 }),
@@ -505,7 +531,10 @@ pub mod test_tube {
                 &ExecuteMsg::Propose(SingleChoiceInstantProposalMsg {
                     title: "Title".to_string(),
                     description: "Description".to_string(),
-                    msgs: vec![execute_propose_msg],
+                    payload: ProposalPayload {
+                        msgs: vec![execute_propose_msg.clone()],
+                        nonce: NONCE.to_string(),
+                    },
                     proposer: None,
                     vote_signatures,
                 }),
@@ -517,6 +546,124 @@ pub mod test_tube {
         // Assert that the response is an error of a specific type (Unauthorized)
         assert!(
             matches!(execute_propose_resp, ExecuteError { msg } if msg.contains("failed to execute message; message index: 0: unauthorized: execute wasm contract failed"))
+        );
+    }
+
+    #[test]
+    #[ignore]
+    /// Test case of a proposal failing due to be replayed
+    fn test_dao_proposal_single_instant_ko_replay() {
+        let (app, contracts, admin, voters) = test_init(2);
+        let bank = Bank::new(&app);
+        let wasm = Wasm::new(&app);
+
+        // Execute bank send from admin to treasury, this is just a preparation step to allow the proposal to be executed.
+        let bank_send_amount = 1000u128;
+        bank.send(
+            MsgSend {
+                from_address: admin.address(),
+                to_address: contracts
+                    .get(SLUG_DAO_DAO_CORE)
+                    .expect("Treasury address not found")
+                    .clone(),
+                amount: vec![v1beta1::Coin {
+                    denom: INITIAL_BALANCE_DENOM.to_string(),
+                    amount: bank_send_amount.to_string(),
+                }],
+            },
+            &admin,
+        )
+        .unwrap();
+
+        // Create proposal execute msg as bank message from treasury back to the admin account
+        let execute_propose_msg_pass: CosmosMsg = CosmosMsg::Bank(BankMsg::Send {
+            to_address: admin.address(),
+            amount: vec![Coin {
+                denom: INITIAL_BALANCE_DENOM.to_string(),
+                amount: Uint128::new(bank_send_amount),
+            }],
+        });
+
+        // Creating different messages for each voter.
+        // The number of items of this array should match the test_init({voters_number}) value.
+        let payloads: Vec<ProposalPayload> = vec![
+            // A <- will pass! 1/2 majority
+            ProposalPayload {
+                msgs: vec![execute_propose_msg_pass.clone()],
+                nonce: NONCE.to_string(),
+            },
+            // A <- will pass! 2/2 majority
+            ProposalPayload {
+                msgs: vec![execute_propose_msg_pass.clone()],
+                nonce: NONCE.to_string(),
+            },
+        ];
+
+        let mut vote_signatures: Vec<VoteSignature> = vec![];
+        for (index, voter) in voters.iter().enumerate() {
+            // Ensure that there's a message for each voter
+            if let Some(clear_message) = payloads.get(index) {
+                let clear_message_adr = create_adr36_message(
+                    &to_json_string(&clear_message).unwrap(),
+                    &voter.address(),
+                );
+                let message_hash = compute_sha256_hash(clear_message_adr.as_bytes());
+                let signature = voter
+                    .signing_key()
+                    .sign(clear_message_adr.as_bytes())
+                    .unwrap();
+                // VoteSignature
+                vote_signatures.push(VoteSignature {
+                    message_hash,
+                    signature: signature.as_ref().to_vec(),
+                    public_key: voter.public_key().to_bytes(),
+                });
+            } else {
+                // Do nothing in the case where there's no message for a voter
+            }
+        }
+
+        // Execute execute_propose (proposal, voting and execution in one single workflow)
+        // This is the first, legit, execution of the proposal. We expect it to be succeed.
+        wasm.execute(
+            contracts.get(SLUG_DAO_PROPOSAL_SINGLE_INSTANT).unwrap(),
+            &ExecuteMsg::Propose(SingleChoiceInstantProposalMsg {
+                title: "Title".to_string(),
+                description: "Description".to_string(),
+                payload: ProposalPayload {
+                    msgs: vec![execute_propose_msg_pass.clone()],
+                    nonce: NONCE.to_string(),
+                },
+                proposer: None,
+                vote_signatures: vote_signatures.clone(),
+            }),
+            &vec![],
+            &admin,
+        )
+        .unwrap();
+
+        // Execute again execute_propose using the same payload.
+        // This time we expect the proposal to fail due to replay of the nonce previously used.
+        let execute_proposal_resp = wasm
+            .execute(
+                contracts.get(SLUG_DAO_PROPOSAL_SINGLE_INSTANT).unwrap(),
+                &ExecuteMsg::Propose(SingleChoiceInstantProposalMsg {
+                    title: "Title".to_string(),
+                    description: "Description".to_string(),
+                    payload: ProposalPayload {
+                        msgs: vec![execute_propose_msg_pass.clone()],
+                        nonce: NONCE.to_string(),
+                    },
+                    proposer: None,
+                    vote_signatures,
+                }),
+                &vec![],
+                &admin,
+            )
+            .unwrap_err();
+        // Assert the error contains "nonce has been already used"
+        assert!(
+            matches!(execute_proposal_resp, ExecuteError { msg } if msg.contains("nonce has been already used"))
         );
     }
 

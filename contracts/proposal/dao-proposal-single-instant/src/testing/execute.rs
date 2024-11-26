@@ -1,7 +1,10 @@
 use cosmwasm_std::{coins, Addr, Coin, CosmosMsg, Uint128};
 use cw_multi_test::{App, BankSudo, Executor};
 
-use crate::msg::SingleChoiceInstantProposalMsg as ProposeMsg;
+use crate::{
+    msg::{ProposalPayload, SingleChoiceInstantProposalMsg as ProposeMsg},
+    testing::test_tube::test_tube::NONCE,
+};
 use cw_denom::CheckedDenom;
 use dao_pre_propose_single as cppbps;
 use dao_voting::{deposit::CheckedDepositInfo, pre_propose::ProposalCreationPolicy, voting::Vote};
@@ -74,7 +77,10 @@ pub(crate) fn make_proposal(
                 &ExecuteMsg::Propose(ProposeMsg {
                     title: "title".to_string(),
                     description: "description".to_string(),
-                    msgs: msgs.clone(),
+                    payload: ProposalPayload {
+                        msgs: msgs.clone(),
+                        nonce: NONCE.to_string(),
+                    },
                     proposer: None,
                     vote_signatures: todo!(),
                 }),

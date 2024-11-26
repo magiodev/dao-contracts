@@ -1,10 +1,10 @@
-use crate::msg::SingleChoiceInstantProposalMsg as ProposeMsg;
+use crate::msg::{ProposalPayload, SingleChoiceInstantProposalMsg as ProposeMsg, VoteSignature};
 use bech32::ToBase32;
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Empty, Env, MessageInfo, Order, Reply,
-    Response, StdResult, Storage, SubMsg, Uint128, WasmMsg,
+    to_json_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Order, Reply, Response,
+    StdResult, Storage, SubMsg, Uint128, WasmMsg,
 };
 use cw2::{get_contract_version, set_contract_version, ContractVersion};
 use cw4::MemberListResponse;
@@ -34,7 +34,7 @@ use std::convert::TryInto;
 
 use crate::msg::MigrateMsg;
 use crate::proposal::{next_proposal_id, SingleChoiceProposal};
-use crate::state::{Config, VoteSignature, CREATION_POLICY};
+use crate::state::{Config, CREATION_POLICY, NONCES};
 use crate::v1_state::{
     v1_duration_to_v2, v1_expiration_to_v2, v1_status_to_v2, v1_threshold_to_v2, v1_votes_to_v2,
 };
@@ -109,7 +109,7 @@ pub fn execute(
         ExecuteMsg::Propose(ProposeMsg {
             title,
             description,
-            msgs,
+            payload,
             proposer,
             vote_signatures,
         }) => execute_propose(
@@ -118,7 +118,7 @@ pub fn execute(
             info,
             title,
             description,
-            msgs,
+            payload,
             proposer,
             vote_signatures,
         ),
@@ -170,7 +170,7 @@ pub fn execute_propose(
     info: MessageInfo,
     title: String,
     description: String,
-    msgs: Vec<CosmosMsg<Empty>>,
+    payload: ProposalPayload,
     proposer: Option<String>,
     vote_signatures: Vec<VoteSignature>,
 ) -> Result<Response, ContractError> {
@@ -183,14 +183,20 @@ pub fn execute_propose(
     }
 
     // We want at least one message to execute
-    if msgs.len() < 1 {
+    if payload.msgs.len() < 1 {
         return Err(ContractError::NotEnoughMsgs {});
     }
 
     // MVP Limitation: Supporting only one msg per proposal
-    if msgs.len() > 1 {
+    if payload.msgs.len() > 1 {
         return Err(ContractError::TooManyMsgs {});
     }
+
+    // Verify nonce and save it in one storage access
+    NONCES.update(deps.storage, &payload.nonce, |existing| match existing {
+        Some(_) => Err(ContractError::NonceAlreadyUsed {}),
+        None => Ok(true),
+    })?;
 
     // Determine the appropriate proposer. If this is coming from our
     // pre-propose module, it must be specified. Otherwise, the
@@ -236,7 +242,7 @@ pub fn execute_propose(
             expiration,
             threshold: config.threshold,
             total_power,
-            msgs: msgs.clone(),
+            msgs: payload.msgs.clone(),
             status: Status::Open,
             votes: Votes::zero(),
             allow_revoting: config.allow_revoting,
@@ -309,7 +315,7 @@ pub fn execute_propose(
 
     // verify and cast votes
     for vote_signature in &vote_signatures {
-        let (address, verified) = verify_message(deps.as_ref(), vote_signature)?;
+        let (address, verified) = verify_message(deps.branch(), vote_signature)?;
         let voter_address = deps.api.addr_validate(address.as_str())?;
 
         // Checking if the current voter is a member with voting power higher than 0
@@ -322,17 +328,14 @@ pub fn execute_propose(
         let is_member = voting_power != Uint128::zero();
 
         // Match the message_hash wrapped by ADR36 SignDoc and signer address
-        let proposal_msg = msgs.get(0).unwrap();
-        let proposal_msg_adr36 = create_adr36_message(
-            &serde_json_wasm::to_string(&proposal_msg).unwrap(),
-            &address,
-        );
-        let proposal_message_hash = compute_sha256_hash(&proposal_msg_adr36.as_bytes());
+        let proposal_payload_adr36 =
+            create_adr36_message(&serde_json_wasm::to_string(&payload).unwrap(), &address);
+        let proposal_payload_hash = compute_sha256_hash(&proposal_payload_adr36.as_bytes());
 
         // If Signature has been verified and a Member address has been found
         if verified && is_member {
             // Compute yes or no vote based on majority previous computed.
-            let vote = Some(if vote_signature.message_hash == proposal_message_hash {
+            let vote = Some(if vote_signature.message_hash == proposal_payload_hash {
                 Vote::Yes
             } else {
                 Vote::No
@@ -375,7 +378,7 @@ pub fn execute_propose(
 // This is veryfing the signature for a given publicKey and messageHash.
 // In the context of this contract, is assumed that the signature is generated from an ADR36 compliant message
 fn verify_message(
-    deps: Deps,
+    deps: DepsMut,
     vote_signature: &VoteSignature,
 ) -> Result<(String, bool), ContractError> {
     let voter_address = derive_addr_from_pubkey(&vote_signature.public_key, "osmo")?;

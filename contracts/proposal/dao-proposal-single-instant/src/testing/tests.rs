@@ -1,6 +1,9 @@
 use std::ops::Add;
 
-use crate::msg::SingleChoiceInstantProposalMsg as ProposeMsg;
+use crate::{
+    msg::{ProposalPayload, SingleChoiceInstantProposalMsg as ProposeMsg},
+    testing::test_tube::test_tube::NONCE,
+};
 use cosmwasm_std::{
     coins,
     testing::{mock_dependencies, mock_env},
@@ -2287,7 +2290,10 @@ fn test_active_threshold_absolute() {
             &ExecuteMsg::Propose(ProposeMsg {
                 title: "title".to_string(),
                 description: "description".to_string(),
-                msgs: vec![],
+                payload: ProposalPayload {
+                    msgs: vec![],
+                    nonce: NONCE.to_string(),
+                },
                 proposer: None,
                 vote_signatures: todo!(),
             }),
@@ -2326,7 +2332,10 @@ fn test_active_threshold_absolute() {
             &ExecuteMsg::Propose(ProposeMsg {
                 title: "title".to_string(),
                 description: "description".to_string(),
-                msgs: vec![],
+                payload: ProposalPayload {
+                    msgs: vec![],
+                    nonce: NONCE.to_string(),
+                },
                 proposer: None,
                 vote_signatures: todo!(),
             }),
@@ -2370,7 +2379,10 @@ fn test_active_threshold_percent() {
             &ExecuteMsg::Propose(ProposeMsg {
                 title: "title".to_string(),
                 description: "description".to_string(),
-                msgs: vec![],
+                payload: ProposalPayload {
+                    msgs: vec![],
+                    nonce: NONCE.to_string(),
+                },
                 proposer: None,
                 vote_signatures: todo!(),
             }),
@@ -2410,7 +2422,10 @@ fn test_active_threshold_percent() {
             &ExecuteMsg::Propose(ProposeMsg {
                 title: "title".to_string(),
                 description: "description".to_string(),
-                msgs: vec![],
+                payload: ProposalPayload {
+                    msgs: vec![],
+                    nonce: NONCE.to_string(),
+                },
                 proposer: None,
                 vote_signatures: todo!(),
             }),
@@ -3475,7 +3490,10 @@ fn test_proposal_creation_permissions() {
             &ExecuteMsg::Propose(ProposeMsg {
                 title: "title".to_string(),
                 description: "description".to_string(),
-                msgs: vec![],
+                payload: ProposalPayload {
+                    msgs: vec![],
+                    nonce: NONCE.to_string(),
+                },
                 proposer: None,
                 vote_signatures: todo!(),
             }),
@@ -3501,7 +3519,10 @@ fn test_proposal_creation_permissions() {
             &ExecuteMsg::Propose(ProposeMsg {
                 title: "title".to_string(),
                 description: "description".to_string(),
-                msgs: vec![],
+                payload: ProposalPayload {
+                    msgs: vec![],
+                    nonce: NONCE.to_string(),
+                },
                 proposer: None,
                 vote_signatures: todo!(),
             }),
@@ -3532,7 +3553,10 @@ fn test_proposal_creation_permissions() {
             &ExecuteMsg::Propose(ProposeMsg {
                 title: "title".to_string(),
                 description: "description".to_string(),
-                msgs: vec![],
+                payload: ProposalPayload {
+                    msgs: vec![],
+                    nonce: NONCE.to_string(),
+                },
                 proposer: Some("ekez".to_string()),
                 vote_signatures: todo!(),
             }),

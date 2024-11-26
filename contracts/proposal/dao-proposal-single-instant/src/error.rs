@@ -35,6 +35,9 @@ pub enum ContractError {
     #[error(transparent)]
     VotingError(#[from] dao_voting::error::VotingError),
 
+    #[error("nonce has been already used")]
+    NonceAlreadyUsed {},
+
     #[error("no such proposal ({id})")]
     NoSuchProposal { id: u64 },
 

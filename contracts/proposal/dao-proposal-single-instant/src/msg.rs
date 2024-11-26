@@ -1,9 +1,46 @@
-use crate::state::VoteSignature;
+use cosmwasm_schema::serde::{self, Deserialize, Deserializer, Serializer};
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::{CosmosMsg, Empty};
 use cw_utils::Duration;
 use dao_dao_macros::proposal_module_query;
 use dao_voting::{pre_propose::PreProposeInfo, threshold::Threshold, veto::VetoConfig};
+
+#[cw_serde]
+pub struct ProposalPayload {
+    pub msgs: Vec<CosmosMsg<Empty>>,
+    /// Nonce that has been used to sign the message.
+    /// This is proposal specific and should be same among same proposal votes.
+    pub nonce: String,
+}
+
+/// A vote cast for an instant proposal containing message_hash and message_signature.
+#[cw_serde]
+pub struct VoteSignature {
+    /// Message hash
+    #[serde(serialize_with = "as_base64", deserialize_with = "from_base64")]
+    pub message_hash: Vec<u8>,
+    /// Signature of message hash
+    #[serde(serialize_with = "as_base64", deserialize_with = "from_base64")]
+    pub signature: Vec<u8>,
+    /// Public key that signed message hash
+    #[serde(serialize_with = "as_base64", deserialize_with = "from_base64")]
+    pub public_key: Vec<u8>,
+}
+
+fn as_base64<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&base64::encode(bytes))
+}
+
+fn from_base64<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    base64::decode(&s).map_err(serde::de::Error::custom)
+}
 
 #[cw_serde]
 pub struct SingleChoiceInstantProposalMsg {
@@ -13,7 +50,8 @@ pub struct SingleChoiceInstantProposalMsg {
     pub description: String,
     /// The messages that should be executed in response to this
     /// proposal passing.
-    pub msgs: Vec<CosmosMsg<Empty>>,
+    /// ProposalPayload is a wrapper struct that contains a "nonce" field to avoid replayability.
+    pub payload: ProposalPayload,
     /// The address creating the proposal. If no pre-propose
     /// module is attached to this module this must always be None
     /// as the proposer is the sender of the propose message. If a
